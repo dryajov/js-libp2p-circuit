@@ -2,31 +2,31 @@
 
 const includes = require('lodash/includes')
 const pull = require('pull-stream')
-const Circuit = require('./circuit-relay')
 const multicodec = require('./multicodec')
 const EE = require('events').EventEmitter
 const lp = require('pull-length-prefixed')
 const multiaddr = require('multiaddr')
 const handshake = require('pull-handshake')
 const Connection = require('interface-connection').Connection
+const mafmt = require('mafmt')
+const codes = require('./codes')
 
 const debug = require('debug')
 
 const log = debug('libp2p:circuit:listener')
 log.err = debug('libp2p:circuit:error:listener')
 
-module.exports = (swarm, handler, options) => {
+module.exports = (swarm, handler) => {
   const listener = new EE()
-  const relayCircuit = new Circuit(swarm)
 
   listener.listen = (ma, cb) => {
     cb = cb || (() => {})
 
-    swarm.handle(multicodec, (proto, conn) => {
+    swarm.handle(multicodec.stop, (proto, conn) => {
       conn.getPeerInfo((err, peerInfo) => {
         if (err) {
           log.err('Failed to identify incoming conn', err)
-          return cb(err, null)
+          return handler(err, null)
         }
 
         let stream = handshake({timeout: 1000 * 60})
@@ -41,31 +41,16 @@ module.exports = (swarm, handler, options) => {
         lp.decodeFromReader(shake, (err, msg) => {
           if (err) {
             log.err(err)
-            return
+            return cb(err)
           }
 
-          let addr = multiaddr(msg.toString()) // read the src multiaddr
-          // make a circuit
-          if (includes(addr.protoNames(), 'p2p-circuit')) {
-            relayCircuit.circuit(shake.rest(), addr, (err) => {
-              if (err) {
-                log.err(err)
-                listener.emit('error', err)
-                return handler(err)
-              }
+          peerInfo.multiaddr.add(multiaddr(msg.toString())) // add the addr we got along with the relay request
+          shake.write(String(codes.SUCCESS))
 
-              listener.emit('circuit')
-              return handler()
-            })
-          } else {
-            // we need this to signal the circuit that the connection is ready
-            // otherwise, the circuit will happen prematurely, which causes the
-            // dialer to fail since the connection is not ready
-            shake.write('\n')
-            let newConn = new Connection(shake.rest(), conn)
-            listener.emit('connection', newConn)
-            handler(null, newConn)
-          }
+          let newConn = new Connection(shake.rest(), conn)
+          newConn.setPeerInfo(peerInfo)
+          listener.emit('connection', newConn)
+          handler(null, newConn)
         })
       })
     })
@@ -79,23 +64,23 @@ module.exports = (swarm, handler, options) => {
     // spdy-transport throws a `Error: socket hang up`
     // on swarm stop right now, I think it's because
     // the socket is abruptly closed?
-    swarm.unhandle(multicodec)
+    swarm.unhandle(multicodec.stop)
     listener.emit('close')
     cb()
   }
 
   listener.getAddrs = (callback) => {
     let addrs = swarm._peerInfo.distinctMultiaddr().filter((addr) => {
-      return includes(addr.protoNames(), 'p2p-circuit')
+      return mafmt.Circuit.matches(addr)
     })
 
     const listenAddrs = []
     addrs.forEach((addr) => {
       const peerMa = `/p2p-circuit/ipfs/${swarm._peerInfo.id.toB58String()}`
       if (addr.toString() !== peerMa) {
-        listenAddrs.push(addr.encapsulate(peerMa))
+        listenAddrs.push(addr.encapsulate(`/ipfs/${swarm._peerInfo.id.toB58String()}`))
       } else {
-        listenAddrs.push(peerMa)
+        listenAddrs.push(peerMa) // by default we're reachable over any relay
       }
     })
 
