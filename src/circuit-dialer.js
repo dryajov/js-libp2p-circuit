@@ -79,7 +79,7 @@ class CircuitDialer {
     }
 
     if (!cb) {
-      cb = (() => {})
+      cb = () => {}
     }
 
     let dstConn = new Connection()
@@ -101,6 +101,11 @@ class CircuitDialer {
 
           if (mas.length > 1) {
             conn.getPeerInfo((err, peerInfo) => {
+              if (err) {
+                log.err(err)
+                return cb(err)
+              }
+
               this.relayPeers.set(peerInfo.id.toB58String(), conn) // add the connection to the list of relays
               dialNext(peerInfo, mas.shift())
             })
@@ -138,7 +143,7 @@ class CircuitDialer {
     }
 
     if (!cb) {
-      cb = (() => {})
+      cb = () => {}
     }
 
     ma = multiaddr(ma)
@@ -176,14 +181,15 @@ class CircuitDialer {
    */
   _initiateRelay (dstPeer, relay, cb) {
     if (isFunction(relay)) {
-      cb = options
+      cb = relay
       relay = null
     }
 
     if (!cb) {
-      cb = (() => {})
+      cb = () => {}
     }
 
+    const relays = Array.from(this.relayPeers.values()).shift()
     const next = (relayPeer) => {
       if (!relayPeer) {
         const err = `no relay peers were found!`
@@ -221,7 +227,7 @@ class CircuitDialer {
     if (relay) {
       next(relay)
     } else {
-      next(Array.from(this.relayPeers.values()).shift())
+      next(relays)
     }
   }
 
@@ -320,6 +326,7 @@ class CircuitDialer {
    * Connect to a relay peer
    *
    * @param {PeerInfo} peerInfo - the PeerInfo of the relay
+   * @param {Function} cb
    * @returns {void}
    *
    * @memberOf CircuitDialer
@@ -335,13 +342,14 @@ class CircuitDialer {
     const relayConn = new Connection()
     relayConn.setPeerInfo(peerInfo)
     // attempt to dia the relay so that we have a connection
+    this.relayPeers.set(peerInfo.id.toB58String(), relayConn)
     this._dialRelay(peerInfo, (err, conn) => {
       if (err) {
         log.err(err)
+        this.relayPeers.delete(peerInfo.id.toB58String())
         return cb(err)
       }
 
-      this.relayPeers.set(peerInfo.id.toB58String(), relayConn)
       relayConn.setInnerConn(conn)
       cb(null, cb)
     })
