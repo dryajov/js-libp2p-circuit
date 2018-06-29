@@ -54,7 +54,7 @@
     "multistream-select": "^0.14.1",
     "mafmt": "dryajov/js-mafmt",
     "multiaddr": "dryajov/js-multiaddr",
-    "peer-info": "dryajov/peer-info",
+    "peer-info": "dryajov/js-peer-info",
     "protons": "^1.0.1",
     "pull-abortable": "^4.1.1",
     "pull-handshake": "^1.1.4",
